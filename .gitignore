@@ -1,0 +1,25 @@
+# Raw / local data
+*.csv
+*.xlsx
+*.xls
+*.sas7bdat
+*.xpt
+
+# SAS temporary and generated files
+*.log
+*.lst
+*.lck
+*.egp
+sashtml.htm
+sashtml1.htm
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Temporary files
+~$*
+*.tmp
+*.bak
