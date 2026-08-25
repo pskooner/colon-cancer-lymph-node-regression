@@ -267,11 +267,9 @@ The presentation summarizes the research question, methods, diagnostics, transfo
 
 ## Reproducibility
 
-The original SAS source code is preserved as completed for the course project.
+The dataset used for this project is the `colon` dataset available through the R `survival` package and is therefore not included separately in this repository.
 
-Because the raw dataset is not distributed in this repository, reproducing the analysis requires obtaining the appropriate `colon` dataset separately and preparing it in the format expected by the SAS program.
-
-The original code contains a local file path used during development. Users reproducing the analysis should update this path in a **personal working copy** rather than modifying the archived original source code.
+The original SAS code has been kept as written for the course project. To reproduce the analysis, the `colon` dataset can be accessed in R, exported for use in SAS, and the file path in the SAS code can be updated to match the user's local directory.
 
 ---
 
