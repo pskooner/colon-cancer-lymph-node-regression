@@ -23,7 +23,7 @@ NOTE: SAS initialization used:
 
 1    /*=============================================================================
 2      PH 1820 - Applied Linear Regression - Final Project
-3      Authors:    Elena Huseni & Parminder Kooner
+3      Author:    Parminder Kooner
 4      Date:       Spring 2026
 5      Dataset:    colon (Stage B/C colon cancer adjuvant chemo trial, N=888)
 6
@@ -818,7 +818,7 @@ NOTE: PROCEDURE TRANSREG used (Total process time):
 
 395
 396
-397  /* The Box–Cox analysis identified a transformation with ? ˜ -0.5 as the maximum likelihood
+397  /* The BoxÂ–Cox analysis identified a transformation with ? Â˜ -0.5 as the maximum likelihood
 397! estimate.
 398  However, the profile likelihood confidence interval for ? was relatively wide and included ? = 0,
 399  indicating that the data do not provide strong evidence that ? = -0.5 is meaningfully better than
