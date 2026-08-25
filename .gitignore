@@ -13,6 +13,11 @@
 sashtml.htm
 sashtml1.htm
 
+# R temporary / workspace files
+.Rhistory
+.RData
+.Ruserdata
+
 # OS / editor files
 .DS_Store
 Thumbs.db
