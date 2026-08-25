@@ -1,6 +1,6 @@
 /*=============================================================================
   PH 1820 - Applied Linear Regression - Final Project
-  Authors:    Elena Huseni & Parminder Kooner
+  Authors:    Parminder Kooner
   Date:       Spring 2026
   Dataset:    colon (Stage B/C colon cancer adjuvant chemo trial, N=888)
 
