@@ -1,0 +1,595 @@
+/*=============================================================================
+  PH 1820 - Applied Linear Regression - Final Project
+  Authors:    Elena Huseni & Parminder Kooner
+  Date:       Spring 2026
+  Dataset:    colon (Stage B/C colon cancer adjuvant chemo trial, N=888)
+
+  Research Question:
+  Do markers of advanced local disease (obstruction, perforation, adherence,
+  extent of local spread) predict greater lymph node involvement at diagnosis
+  in Stage B/C colon cancer patients, after adjusting for age, sex, tumor
+  differentiation, treatment, and time from surgery to registration?
+
+  Response (Y): nodes (number of positive lymph nodes count, treated as
+                       quasi-continuous; log-transform if skewed)
+  Primary predictors:    obstruct, perfor, adhere, extent
+  Adjustment covariates: age, sex, rx, differ, surg
+  Excluded: time/status/etype (censored), node4 (collinear w/ response),
+            id, study, rownames
+=============================================================================*/
+
+
+/*=============================================================================*/
+/* Step 1. Data Import and Preparation */
+/*=============================================================================*/
+
+
+/* Import Data Set */ 
+proc import datafile="C:\Users\pkooner\Desktop\Kooner\colon_full.csv"
+    out=colon
+    dbms=csv
+    replace;
+    guessingrows=max;
+run;
+
+/* Fixing Data Types */
+DATA colon;
+    SET colon;
+    /* Convert nodes to numeric */
+    nodes_num = INPUT(nodes, BEST12.);
+
+    /* Convert differ safely (handle "NA") */
+    IF differ = "NA" THEN differ_num = .;
+    ELSE differ_num = INPUT(differ, BEST12.);
+
+    /* Replace originals */
+    DROP nodes differ;
+    RENAME nodes_num = nodes
+           differ_num = differ;
+RUN;
+
+/* Filter to one record per patient (etype=2 = death record).
+   Drop variables we're not using. Overwrites 'colon' with the analytic set.  */
+DATA colon;
+    SET colon;
+    WHERE etype = 2;
+    DROP rownames id study time status etype node4;
+RUN;
+
+/* Data structure */
+proc contents data=colon; 
+    title "Dataset Structure (Post-Cleaning)";
+run;
+
+/* Sanity check: should be N=929 after we kept 1 record for each patient */
+PROC SQL;
+    SELECT COUNT(*) AS N FROM colon;
+QUIT;
+
+/* Check missingness on ALL analytic variables.
+   PROC MEANS handles numeric (continuous + numerically-coded categoricals); */
+   
+PROC MEANS DATA=colon NMISS N;
+    VAR nodes age sex obstruct perfor adhere differ extent surg;
+    TITLE "Missingness check: numeric variables";
+RUN;
+
+/* PROC FREQ shows the distribution of categorical levels including missing. */
+
+PROC FREQ DATA=colon;
+    TABLES rx sex obstruct perfor adhere differ extent surg / MISSING;
+    TITLE "Missingness check: categorical variables (incl. character rx)";
+RUN;
+
+/*  use complete-case analysis (drop the missing rows) */
+DATA colon;
+    SET colon;
+    IF CMISS(OF nodes age sex rx obstruct perfor adhere differ extent surg) = 0;
+RUN;
+ 
+ /* Check final N sample size after dropping the values */ 
+
+PROC SQL;
+    SELECT COUNT(*) AS N_complete FROM colon;
+QUIT;
+
+/*=============================================================================*/
+/* Step 2. Exploratory Data Analysis */
+/*=============================================================================*/
+
+/* 2.1 Univariate summaries for continuous variables */
+PROC MEANS DATA=colon N MEAN STD MIN Q1 MEDIAN Q3 MAX MAXDEC=2;
+    VAR nodes age;
+    TITLE "EDA: Continuous variable summaries";
+RUN;
+
+PROC UNIVARIATE DATA=colon;
+    VAR nodes age;
+    HISTOGRAM nodes age / NORMAL KERNEL;
+    QQPLOT nodes age / NORMAL(MU=EST SIGMA=EST);
+    TITLE "EDA: Distributions of continuous variables";
+RUN;
+
+/* 2.2 Frequency tables for categorical variables */
+PROC FREQ DATA=colon;
+    TABLES rx sex obstruct perfor adhere differ extent surg;
+    TITLE "EDA: Categorical variable distributions";
+RUN;
+
+/* 2.3 Bivariate: nodes vs. age */
+PROC SGPLOT DATA=colon;
+    SCATTER X=age Y=nodes;
+    REG X=age Y=nodes;
+    TITLE "EDA: nodes vs age with regression line";
+RUN;
+
+/* 2.4 Boxplots: nodes by each categorical predictor */
+PROC SGPLOT DATA=colon;  VBOX nodes / CATEGORY=rx;       TITLE "nodes by treatment (rx)";       RUN;
+PROC SGPLOT DATA=colon;  VBOX nodes / CATEGORY=sex;      TITLE "nodes by sex";                 RUN;
+PROC SGPLOT DATA=colon;  VBOX nodes / CATEGORY=obstruct; TITLE "nodes by obstruct";            RUN;
+PROC SGPLOT DATA=colon;  VBOX nodes / CATEGORY=perfor;   TITLE "nodes by perfor";              RUN;
+PROC SGPLOT DATA=colon;  VBOX nodes / CATEGORY=adhere;   TITLE "nodes by adhere";              RUN;
+PROC SGPLOT DATA=colon;  VBOX nodes / CATEGORY=differ;   TITLE "nodes by differ";              RUN;
+PROC SGPLOT DATA=colon;  VBOX nodes / CATEGORY=extent;   TITLE "nodes by extent";              RUN;
+PROC SGPLOT DATA=colon;  VBOX nodes / CATEGORY=surg;     TITLE "nodes by surg";                RUN;
+
+/* 2.5 Correlations between continuous variables */
+PROC CORR DATA=colon PEARSON SPEARMAN;
+    VAR nodes age;
+    TITLE "EDA: Correlation between continuous variables";
+RUN;
+
+/* 2.6 Cross-tabs to check for multicollinearity among local-disease markers */
+PROC FREQ DATA=colon;
+    TABLES (obstruct perfor adhere)*extent / CHISQ;
+    TITLE "EDA: Local-disease marker associations";
+RUN;
+
+/*=============================================================================*/
+/* Step 3. Preliminary Full Main Effects Model ( Y = nodes, untransformed) */
+/*=============================================================================*/
+
+/* 3.1 Create indicator variables for categorical predictors.
+   Reference levels are chosen to be the clinically benign / "no" group:
+     rx       reference = Obs (observation)
+     sex      reference = 0  (female)
+     obstruct reference = 0  (no obstruction)
+     perfor   reference = 0  (no perforation)
+     adhere   reference = 0  (no adherence)
+     differ   reference = 1  (well-differentiated)
+     extent   reference = 1  (submucosa - least invasive)
+     surg     reference = 0  (short time from surgery)                        */
+    
+DATA colon_reg;
+    SET colon;
+    /* rx: 3-level character -> 2 indicators */
+    rx_lev   = (rx = "Lev");
+    rx_5fu   = (rx = "Lev+5FU");
+    /* differ: 3-level numeric -> 2 indicators */
+    differ_2 = (differ = 2);
+    differ_3 = (differ = 3);
+    /* extent: 4-level numeric -> 3 indicators */
+    extent_2 = (extent = 2);
+    extent_3 = (extent = 3);
+    extent_4 = (extent = 4);
+    /* sex, obstruct, perfor, adhere, surg are already 0/1 - use as-is */
+RUN;
+
+
+/* 3.2 Fit the full main-effects model & residual diagnostics */
+PROC REG DATA=colon_reg PLOTS=ALL;
+    MODEL nodes = age
+                  obstruct perfor adhere
+                  extent_2 extent_3 extent_4
+                  rx_lev rx_5fu
+                  sex
+                  differ_2 differ_3
+                  surg
+                  / CLB VIF;
+    OUTPUT OUT=full_diag P=yhat R=resid RSTUDENT=rstud
+           COOKD=cookd H=lev DFFITS=dffits;
+    TITLE "Step 3: Full main-effects model (Y = nodes)";
+RUN; QUIT;
+
+/*=============================================================================*/
+/* Step 4. Model Diagnostics */
+/*=============================================================================*/
+
+/* 4.1 Residual plots - linearity & constant variance */
+PROC SGPLOT DATA=full_diag;
+    SCATTER X=yhat Y=resid;
+    REFLINE 0 / AXIS=Y;
+    TITLE "Diagnostic: Residuals vs Fitted";
+RUN;
+
+PROC SGPLOT DATA=full_diag;
+    SCATTER X=age Y=resid;
+    REFLINE 0 / AXIS=Y;
+    TITLE "Diagnostic: Residuals vs age";
+RUN;
+
+/* 4.2 Normality of residuals */
+PROC UNIVARIATE DATA=full_diag NORMAL;
+    VAR resid;
+    HISTOGRAM resid / NORMAL;
+    QQPLOT resid / NORMAL(MU=EST SIGMA=EST);
+    TITLE "Diagnostic: Normality of residuals";
+RUN;
+
+/* 4.3 Constant variance: Breusch-Pagan & White tests via PROC MODEL */
+PROC MODEL DATA=colon_reg;
+    PARMS b0 b1-b13;
+
+    nodes =
+        b0
+        + b1*age
+        + b2*obstruct
+        + b3*perfor
+        + b4*adhere
+        + b5*extent_2
+        + b6*extent_3
+        + b7*extent_4
+        + b8*rx_lev
+        + b9*rx_5fu
+        + b10*sex
+        + b11*differ_2
+        + b12*differ_3
+        + b13*surg;
+
+    FIT nodes / WHITE BREUSCH=(age obstruct perfor adhere
+                              extent_2 extent_3 extent_4
+                              rx_lev rx_5fu sex
+                              differ_2 differ_3 surg);
+
+    TITLE "Breusch-Pagan & White Test (Full Model)";
+RUN; QUIT;
+
+/* 4.4 Multicollinearity: VIFs (need numeric coding) */
+DATA colon_num;
+    SET colon_reg;
+    /* Reference-coded indicator variables */
+    IF rx="Lev"     THEN rx_lev = 1; ELSE rx_lev = 0;
+    IF rx="Lev+5FU" THEN rx_5fu = 1; ELSE rx_5fu = 0;
+    differ_2 = (differ=2);
+    differ_3 = (differ=3);
+    extent_2 = (extent=2);
+    extent_3 = (extent=3);
+    extent_4 = (extent=4);
+RUN;
+
+PROC REG DATA=colon_num;
+    MODEL nodes = age sex obstruct perfor adhere surg
+                  rx_lev rx_5fu differ_2 differ_3 extent_2 extent_3 extent_4
+                  / VIF TOL COLLIN;
+    TITLE "Diagnostic: Multicollinearity (VIF / Tolerance)";
+RUN; QUIT;
+
+/*=============================================================================*/
+/* Step 5. Influential Points (Kutner Ch. 10) - Required by Rubric */
+/*=============================================================================*/
+
+PROC REG DATA=colon_num
+         PLOTS(LABEL ONLY)=(COOKSD RSTUDENTBYLEVERAGE DFFITS DFBETAS);
+    MODEL nodes = age sex obstruct perfor adhere surg
+                  rx_lev rx_5fu differ_2 differ_3 extent_2 extent_3 extent_4
+                  / INFLUENCE R;
+    OUTPUT OUT=infl_data
+           P=yhat R=resid RSTUDENT=rstud
+           COOKD=cookd H=lev DFFITS=dffits;
+    TITLE "Step 5: Influential points - Cook's D, DFFITS, DFBETAS";
+RUN; QUIT;
+
+/* Apply Kutner thresholds. With p=14 predictors + intercept and N=888:
+   - Leverage threshold:  2*p/n  = 2*15/888 ~ 0.03378378
+   - DFFITS threshold:    2*sqrt(p/n) = 2*sqrt(15/888) ~ 0.260
+   - DFBETAS threshold:   2/sqrt(n)   = 2/sqrt(888) ~ 0.067
+   - Studentized deleted residual: |t*| > Bonferroni critical                 */
+
+%let n = 888;
+%let p = 15;
+
+DATA infl_flagged;
+    SET infl_data;
+    flag_lev    = (lev    > 2*&p/&n);
+    flag_dffits = (ABS(dffits) > 2*SQRT(&p/&n));
+    flag_cookd  = (cookd  > 4/&n);                   /* common rule-of-thumb */
+    flag_rstud  = (ABS(rstud) > 3);                    /* large outliers */
+    any_flag    = MAX(flag_lev, flag_dffits, flag_cookd, flag_rstud);
+RUN;
+
+PROC PRINT DATA=infl_flagged (WHERE=(any_flag=1));
+    VAR nodes age sex obstruct perfor adhere extent differ rx surg
+        yhat resid rstud lev cookd dffits;
+    TITLE "Step 5: Flagged influential observations";
+RUN;
+
+/* Sensitivity refit excluding flagged points */
+PROC GLM DATA=infl_flagged (WHERE=(any_flag=0)) PLOTS=NONE;
+      CLASS rx sex obstruct perfor adhere differ extent surg;                                               
+      MODEL nodes = age obstruct perfor adhere extent rx sex differ surg
+                    / SOLUTION CLPARM;                                                                      
+      TITLE "Step 5: Sensitivity refit excluding flagged points";                                           
+  RUN; QUIT;
+
+/*=============================================================================*/
+/* Step 6. Box-Cox to determine appropriate transformation */
+/*=============================================================================*/
+
+/* Box-Cox to determine appropriate transformation */
+DATA colon_reg;
+    SET colon_reg;
+    nodes_bc = nodes + 1;
+RUN;
+
+PROC TRANSREG DATA=colon_reg;
+    MODEL BOXCOX(nodes_bc) = IDENTITY(
+        age obstruct perfor adhere
+        extent_2 extent_3 extent_4
+        rx_lev rx_5fu sex
+        differ_2 differ_3 surg
+    );
+RUN;
+
+
+/* The Box–Cox analysis identified a transformation with λ ≈ −0.5 as the maximum likelihood estimate. 
+However, the profile likelihood confidence interval for λ was relatively wide and included λ = 0, 
+indicating that the data do not provide strong evidence that λ = −0.5 is meaningfully better than λ = 0.
+Given this, we did not adopt the λ = −0.5 transformation. Instead, we selected λ = 0, corresponding to 
+a log(nodes + 1) transformation, because it represents a simpler and more interpretable transformation 
+for our outcome. In this study, the number of positive lymph nodes has a clear clinical interpretation, 
+and the log transformation preserves the direction of the relationship while allowing 
+effects to be interpreted on a relative scale. */
+
+/*=============================================================================*/
+/* Step 6. Response Transformation */
+/*=============================================================================*/
+
+/* Create log-transformed response */
+/* A new dataset */
+DATA colon_log;
+    SET colon_reg;
+    log_nodes = LOG(nodes + 1);
+RUN;
+/* Log transformation applied based on Box-Cox results and initial diagnostics 
+   (right-skewness and variance heterogeneity) */
+
+/* Fit model with transformed response */
+PROC REG DATA=colon_log PLOTS=ALL;
+    MODEL log_nodes = age
+                      obstruct perfor adhere
+                      extent_2 extent_3 extent_4
+                      rx_lev rx_5fu
+                      sex
+                      differ_2 differ_3
+                      surg
+                      / CLB VIF;
+    OUTPUT OUT=log_diag P=yhat_log R=resid_log RSTUDENT=rstud_log
+           COOKD=cookd_log H=lev_log DFFITS=dffits_log;
+    TITLE "Step 6: Full model with log(nodes+1)";
+RUN; QUIT;
+
+/* Model Diagnostics after transformation */
+/* Residuals vs fitted */
+PROC SGPLOT DATA=log_diag;
+    SCATTER X=yhat_log Y=resid_log;
+    REFLINE 0 / AXIS=Y;
+    TITLE "Log Model: Residuals vs Fitted";
+RUN;
+
+/* Normality */
+PROC UNIVARIATE DATA=log_diag NORMAL;
+    VAR resid_log;
+    HISTOGRAM resid_log / NORMAL;
+    QQPLOT resid_log / NORMAL(MU=EST SIGMA=EST);
+    TITLE "Log Model: Residual Normality";
+RUN;
+
+/* Influence diagnostics for log-transformed model */
+PROC REG DATA=colon_log;
+    MODEL log_nodes =
+        age obstruct perfor adhere
+        extent_2 extent_3 extent_4
+        rx_lev rx_5fu sex
+        differ_2 differ_3 surg
+        / INFLUENCE;
+
+    OUTPUT OUT=diag_log
+        RSTUDENT=rstud_log
+        H=leverage
+        COOKD=cookd_log
+        DFFITS=dffits_log;
+RUN; QUIT;
+
+/* Flagging influential observations */
+DATA diag_log_flag;
+    SET diag_log;
+
+    flag_cookd  = (cookd  > 4/&n);
+    flag_dffits = (abs(dffits) > 2*sqrt(&p/&n));
+    flag_lev    = (leverage > 2*&p/&n);
+RUN;
+
+/* Constant variance tests for log-transformed model */
+PROC MODEL DATA=colon_log;
+    PARMS b0 b1-b13;
+
+    log_nodes =
+        b0
+        + b1*age
+        + b2*obstruct
+        + b3*perfor
+        + b4*adhere
+        + b5*extent_2
+        + b6*extent_3
+        + b7*extent_4
+        + b8*rx_lev
+        + b9*rx_5fu
+        + b10*sex
+        + b11*differ_2
+        + b12*differ_3
+        + b13*surg;
+
+    FIT log_nodes / WHITE BREUSCH=(age obstruct perfor adhere
+                                  extent_2 extent_3 extent_4
+                                  rx_lev rx_5fu sex
+                                  differ_2 differ_3 surg);
+
+    TITLE "Breusch-Pagan & White Test (Log-Transformed Model)";
+RUN; QUIT;
+
+/*=============================================================================*/
+/* Step 7. Partial F Test */
+/*=============================================================================*/
+
+/* Reduced model (covariates only) */
+PROC REG DATA=colon_log;
+    MODEL log_nodes = age sex differ_2 differ_3 rx_lev rx_5fu surg;
+    TITLE "Reduced Model for Partial F-test (No Disease Markers)";
+RUN; QUIT;
+
+/* Full model */
+PROC REG DATA=colon_log;
+    MODEL log_nodes = age sex differ_2 differ_3 rx_lev rx_5fu surg
+                      obstruct perfor adhere
+                      extent_2 extent_3 extent_4;
+    TITLE "Full Model for Partial F-test (With Disease Markers)";
+RUN; QUIT;
+
+/*=============================================================================*/
+/* Step 8. Interaction Terms */
+/*=============================================================================*/
+
+/* Create interactions */
+DATA colon_interact;
+    SET colon_log;
+
+    int_obstruct_extent2 = obstruct * extent_2;
+    int_obstruct_extent3 = obstruct * extent_3;
+    int_obstruct_extent4 = obstruct * extent_4;
+
+    int_perfor_extent2 = perfor * extent_2;
+    int_perfor_extent3 = perfor * extent_3;
+    int_perfor_extent4 = perfor * extent_4;
+
+    int_adhere_extent2 = adhere * extent_2;
+    int_adhere_extent3 = adhere * extent_3;
+    int_adhere_extent4 = adhere * extent_4;
+RUN;
+
+
+/* Fit interaction model */
+PROC REG DATA=colon_interact;
+    MODEL log_nodes = age sex differ_2 differ_3 rx_lev rx_5fu surg
+                      obstruct perfor adhere
+                      extent_2 extent_3 extent_4
+                      int_obstruct_extent2 int_obstruct_extent3
+                      int_perfor_extent2   int_perfor_extent3
+                      int_adhere_extent2   int_adhere_extent3
+                      / VIF;
+    TITLE "Interaction Model (Fixed)";
+RUN; QUIT;
+
+/*=============================================================================*/
+/* Step 9. Model Selection (Best subsets and stepwise) */
+/*=============================================================================*/
+
+/* Best subsets */
+PROC REG DATA=colon_log;
+    MODEL log_nodes = age sex differ_2 differ_3 rx_lev rx_5fu surg
+                      obstruct perfor adhere
+                      extent_2 extent_3 extent_4
+                      / SELECTION=ADJRSQ CP AIC BIC BEST=10;
+    TITLE "Model Selection - Best 10 Models";
+RUN; QUIT;
+
+/* Stepwise */
+PROC REG DATA=colon_log;
+    MODEL log_nodes = age sex differ_2 differ_3 rx_lev rx_5fu surg
+                      obstruct perfor adhere
+                      extent_2 extent_3 extent_4
+                      / SELECTION=STEPWISE SLENTRY=0.05 SLSTAY=0.05;
+    TITLE "Model Selection - Stepwise";
+RUN; QUIT;
+
+/* Press Validation */
+PROC REG DATA=colon_log;
+    MODEL log_nodes = age sex differ_2 differ_3 rx_lev rx_5fu surg
+                      obstruct perfor adhere
+                      extent_2 extent_3 extent_4
+                      / PRESS;
+    TITLE "PRESS Statistic for Validation";
+RUN; QUIT;
+
+/*=============================================================================*/
+/* STEP 10. After Selection - Final Model */
+/*=============================================================================*/
+
+PROC REG DATA=colon_log;
+    MODEL log_nodes = age differ_2 differ_3 extent_3
+                      / CLB VIF;
+    OUTPUT OUT=final_out P=yhat_final R=resid_final;
+    TITLE "Final Model";
+RUN; QUIT;
+
+/* 
+Final model excludes extent_4 despite its statistical significance in some models.
+
+Reason:
+- extent_4 represents the most advanced disease category and is highly correlated 
+  with extent_3 (same underlying variable).
+- Including both extent_3 and extent_4 did not meaningfully improve model fit 
+  (minimal change in adjusted R-square, AIC/BIC, and PRESS).
+- Stepwise selection did not retain extent_4.
+- For parsimony and interpretability, extent_3 was retained as the primary 
+  indicator of advanced disease.
+
+Therefore, extent_4 was excluded from the final model.
+*/
+
+/*=============================================================================*/
+/* STEP 11. Lack-of-Fit Test */
+/*=============================================================================*/
+
+PROC REG DATA=colon_log;
+    MODEL log_nodes = age differ_2 differ_3 extent_3 / LACKFIT;
+    TITLE "Lack-of-Fit Test for Final Model";
+RUN; QUIT;
+
+
+/*=============================================================================*/
+/* STEP 12. Final Diagnostics */
+/*=============================================================================*/
+
+PROC SGPLOT DATA=final_out;
+    SCATTER X=yhat_final Y=resid_final;
+    REFLINE 0 / AXIS=Y;
+    TITLE "Final Model Residuals vs Fitted";
+RUN;
+
+PROC UNIVARIATE DATA=final_out NORMAL;
+    VAR resid_final;
+    HISTOGRAM resid_final / NORMAL;
+    QQPLOT resid_final / NORMAL(MU=EST SIGMA=EST);
+    TITLE "Final Model Normality";
+RUN;
+
+/*=============================================================================*/
+/* STEP 13. Prediction and Intervals */
+/*=============================================================================*/
+
+PROC REG DATA=colon_log;
+    MODEL log_nodes = age differ_2 differ_3 extent_3
+                      / CLM CLI;
+    TITLE "Final Model: Confidence & Prediction Intervals";
+RUN; QUIT;
+
+/*=============================================================================*/
+/* STEP 14. Bonferroni Simulatenous CI */
+/*=============================================================================*/
+
+PROC GLM DATA=colon_log;
+    CLASS extent differ;
+    MODEL log_nodes = age differ extent;
+    MEANS extent / BON;
+    TITLE "Bonferroni Simultaneous Confidence Intervals";
+RUN; QUIT;
