@@ -2,13 +2,11 @@
 
 ## Overview
 
-This repository contains the final project for **PH 1820 – Applied Linear Regression (Spring 2026)** by **Elena Huseni and Parminder Kooner**.
+This repository contains the final project for **PH 1820 – Applied Linear Regression (Spring 2026)** by **Parminder Kooner**.
 
-The project evaluates whether markers of advanced local disease—**obstruction, perforation, adherence, and extent of local spread**—are associated with the number of positive lymph nodes at diagnosis among patients with Stage II/III colon cancer, after adjustment for age, sex, treatment, tumor differentiation, and time from surgery to registration.
+The project evaluates whether markers of advanced local disease **obstruction, perforation, adherence, and extent of local spread** are associated with the number of positive lymph nodes at diagnosis among patients with Stage II/III colon cancer, after adjustment for age, sex, treatment, tumor differentiation, and time from surgery to registration.
 
 The analysis was conducted in **SAS** using multiple linear regression, model diagnostics, response transformation, influence assessment, partial F testing, interaction assessment, model selection, validation, and simultaneous confidence intervals.
-
-> **Important:** The original analysis code is preserved exactly as written for the course project. No analytical code has been rewritten or altered for this GitHub repository.
 
 ---
 
@@ -106,17 +104,17 @@ colon-cancer-lymph-node-regression/
 ├── .gitignore
 │
 ├── code/
-│   └── Huseni_Kooner_PH1820_Final_Project.txt
+│   └── final_project.txt
 │
 ├── data/
 │   └── README.md
 │
 ├── presentation/
-│   └── Huseni_Kooner_PH1820_Final_Project_with_recordings.pptx
+│   └── final_project.pptx
 │
 └── results/
     ├── README.md
-    └── Huseni_Kooner_PH1820_Final_Project.sas
+    └── final_project.sas
 ```
 
 ---
@@ -125,11 +123,9 @@ colon-cancer-lymph-node-regression/
 
 The complete original SAS code is available here:
 
-[`code/Huseni_Kooner_PH1820_Final_Project.txt`](code/Huseni_Kooner_PH1820_Final_Project.txt)
+[`code/final_project.txt`](code/final_project.txt)
 
 The code is intentionally retained **without modification** to preserve the original course-project analysis.
-
-Because the original SAS code contains a local Windows path for `colon_full.csv`, users wishing to rerun the analysis will need to change that file path locally or recreate the expected directory structure. That path has not been edited here in order to preserve the original code exactly.
 
 ---
 
@@ -137,7 +133,7 @@ Because the original SAS code contains a local Windows path for `colon_full.csv`
 
 The final course presentation is included in:
 
-[`presentation/Huseni_Kooner_PH1820_Final_Project_with_recordings.pptx`](presentation/Huseni_Kooner_PH1820_Final_Project_with_recordings.pptx)
+[`presentation/final_project.pptx`](presentation/final_projects.pptx)
 
 It summarizes the research question, methods, diagnostics, transformation decision, model-selection process, final model, validation results, and scientific interpretation.
 
@@ -167,8 +163,6 @@ It summarizes the research question, methods, diagnostics, transformation decisi
 
 The original source code is preserved exactly as submitted. The raw analysis dataset is not distributed in this repository. To reproduce the analysis, obtain the appropriate `colon` dataset, prepare it in the format expected by the SAS program, and update the local data path in a personal working copy of the program.
 
-Do not commit patient-level or otherwise restricted data to a public repository.
-
 ---
 
 ## References
@@ -181,7 +175,6 @@ Do not commit patient-level or otherwise restricted data to a public repository.
 
 ## Authors
 
-**Elena Huseni**  
 **Parminder Kooner**
 
 PH 1820 – Applied Linear Regression  
